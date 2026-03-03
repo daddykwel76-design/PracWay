@@ -64,6 +64,7 @@ public sealed class PracWayPlugin : BasePlugin
         RegisterListener<Listeners.OnMapStart>(OnMapStart);
         RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath, HookMode.Pre);
         RegisterEventHandler<EventRoundStart>(OnRoundStart);
+        RegisterEventHandler<EventRoundEnd>(OnRoundEnd);
         RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnect);
 		RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn, HookMode.Post);
         AddCommandListener("say",      OnPlayerSay);
@@ -126,6 +127,22 @@ public sealed class PracWayPlugin : BasePlugin
         {
             _roundStartHandled = false;
             if (_session != null) StartNextRound();
+        });
+
+        return HookResult.Continue;
+    }
+
+    private HookResult OnRoundEnd(EventRoundEnd @event, GameEventInfo _)
+    {
+        if (_session == null) return HookResult.Continue;
+        if (_session.RoundFinalized) return HookResult.Continue;
+        if (_session.RoundNumber <= 0) return HookResult.Continue;
+
+        // Si le moteur termine le round (ex: Terrorist win), on garde la boucle PracWay.
+        AddTimer(0.1f, () =>
+        {
+            if (_session == null) return;
+            FinalizeRound();
         });
 
         return HookResult.Continue;
@@ -778,7 +795,17 @@ private void FinalizeRound()
     {
         if (_session == null) { caller?.PrintToChat(P + " Aucun parcours en cours."); return; }
         Server.PrintToChatAll(P + " Parcours arrete par \x04" + (caller?.PlayerName ?? "le serveur") + "\x01.");
-        EndWaySession(caller);
+        try
+        {
+            EndWaySession(caller);
+        }
+        catch (Exception ex)
+        {
+            Server.PrintToConsole("[PracWay] StopWay exception: " + ex.Message);
+            _session = null;
+            StopAllBotTimers();
+            Server.ExecuteCommand("bot_kick");
+        }
     }
 
  private void EndWaySession(CCSPlayerController? _caller = null)
@@ -799,7 +826,7 @@ private void FinalizeRound()
     {
         if (_killCount.Count == 0) return;
         Server.PrintToChatAll(P + " == KILLS ==");
-        foreach (var kv in _killCount.OrderByDescending(x => x.Value))
+        foreach (var kv in _killCount.ToArray().OrderByDescending(x => x.Value))
         {
             var pl   = Utilities.GetPlayers().FirstOrDefault(p => p.IsValid && !p.IsBot && p.SteamID == kv.Key);
             var name = pl?.PlayerName ?? "#" + kv.Key;
