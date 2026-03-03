@@ -52,7 +52,6 @@ public sealed class PracWayPlugin : BasePlugin
 
     private ActiveSession? _session;
     private bool _roundStartHandled = false;
-	private bool _botsSpawning = false;
 
     // ───────────────────────────────────────────────────────────────────────────
     public override void Load(bool hotReload)
@@ -198,8 +197,8 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
     if (_session == null) return HookResult.Continue;
     var p = @event.Userid;
     if (p == null || !p.IsValid || !p.IsBot) return HookResult.Continue;
-    if (_botsSpawning) return HookResult.Continue; // nos bots → laisser passer
-    AddTimer(0.1f, () => { if (p.IsValid && p.IsBot && _session != null) Server.ExecuteCommand("bot_kick " + p.PlayerName); });
+    // Ne pas kick ici: certains bots peuvent spawn légèrement plus tard,
+    // on les corrige via EnsureExactCtBotsAndPlace.
     return HookResult.Continue;
 }
 
@@ -634,6 +633,7 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
         if (_session == null) return;
 
         StopAllBotTimers();
+        _killCount.Clear();
 
         if (_session.Config.RoundLimit > 0 && _session.RoundNumber >= _session.Config.RoundLimit)
         {
@@ -715,19 +715,27 @@ var botSlots = new[] { SpawnSlot.CT1, SpawnSlot.CT2, SpawnSlot.CT3, SpawnSlot.CT
 
 // Étape 1 : kick + add des bots
 Server.ExecuteCommand("bot_kick");
+Server.ExecuteCommand("bot_quota 0");
+Server.ExecuteCommand("bot_quota_mode normal");
+Server.ExecuteCommand("bot_join_team ct");
 Server.ExecuteCommand("bot_freeze 0");
 Server.ExecuteCommand("bot_stop 0");
 AddTimer(0.8f, () =>
 {
     if (_session == null) return;
-    _botsSpawning = true;
     for (int i = 0; i < botCtCount; i++)
         Server.ExecuteCommand("bot_add_ct");
-    AddTimer(0.5f, () => _botsSpawning = false);
 });
 
 // Étape 2 : téléportation + équipement + freeze (après que les bots soient spawned)
 AddTimer(1.8f, () =>
+{
+    if (_session == null) return;
+    EnsureExactCtBotsAndPlace(zone, botCtCount, money, botSlots, attempt: 0);
+});
+
+// Passe de correction tardive: certains bots peuvent spawn après la 1re passe.
+AddTimer(2.8f, () =>
 {
     if (_session == null) return;
     EnsureExactCtBotsAndPlace(zone, botCtCount, money, botSlots, attempt: 0);
@@ -825,27 +833,33 @@ private void FinalizeRound()
     {
         if (_session == null) return;
 
+        var allBots = Utilities.GetPlayers()
+            .Where(p => p.IsValid && p.IsBot)
+            .ToList();
+
         var bots = Utilities.GetPlayers()
             .Where(p => p.IsValid && p.IsBot && p.TeamNum == (int)CsTeam.CounterTerrorist)
             .OrderBy(p => p.UserId ?? int.MaxValue)
             .ToList();
 
-        if (bots.Count != expectedCtBots)
+        bool hasNonCtBots = allBots.Any(b => b.TeamNum != (int)CsTeam.CounterTerrorist);
+        if (bots.Count != expectedCtBots || allBots.Count != expectedCtBots || hasNonCtBots)
         {
             if (attempt >= 3)
             {
-                Server.PrintToConsole("[PracWay] Unable to stabilize CT bot count. Expected: " + expectedCtBots + ", got: " + bots.Count);
+                Server.PrintToConsole("[PracWay] Unable to stabilize bot count. Expected CT/Total: " + expectedCtBots + ", got CT: " + bots.Count + ", total: " + allBots.Count);
                 return;
             }
 
             Server.ExecuteCommand("bot_kick");
-            _botsSpawning = true;
+            Server.ExecuteCommand("bot_quota 0");
+            Server.ExecuteCommand("bot_quota_mode normal");
+            Server.ExecuteCommand("bot_join_team ct");
             for (int i = 0; i < expectedCtBots; i++)
                 Server.ExecuteCommand("bot_add_ct");
 
             AddTimer(0.6f, () =>
             {
-                _botsSpawning = false;
                 EnsureExactCtBotsAndPlace(zone, expectedCtBots, money, botSlots, attempt + 1);
             });
             return;
