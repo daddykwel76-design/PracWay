@@ -730,20 +730,7 @@ AddTimer(0.8f, () =>
 AddTimer(1.8f, () =>
 {
     if (_session == null) return;
-    var bots = Utilities.GetPlayers()
-        .Where(p => p.IsValid && p.IsBot && p.TeamNum == (int)CsTeam.CounterTerrorist)
-        .ToList();
-
-    for (int i = 0; i < bots.Count && i < botSlots.Length; i++)
-    {
-        var bSpawns = zone.GetSpawns(botSlots[i]);
-        if (bSpawns.Count == 0) continue;
-        var entry = bSpawns[Random.Shared.Next(bSpawns.Count)];
-
-TeleportPlayer(bots[i], entry.Spawn);
-EquipBotCt(bots[i], money);
-ApplyBotAction(bots[i], entry);
-    }
+    EnsureExactCtBotsAndPlace(zone, botCtCount, money, botSlots, attempt: 0);
 });
 
         _session.RoundTimer?.Kill();
@@ -834,6 +821,48 @@ private void FinalizeRound()
         }
     }
 
+    private void EnsureExactCtBotsAndPlace(WayZone zone, int expectedCtBots, int money, SpawnSlot[] botSlots, int attempt)
+    {
+        if (_session == null) return;
+
+        var bots = Utilities.GetPlayers()
+            .Where(p => p.IsValid && p.IsBot && p.TeamNum == (int)CsTeam.CounterTerrorist)
+            .OrderBy(p => p.UserId ?? int.MaxValue)
+            .ToList();
+
+        if (bots.Count != expectedCtBots)
+        {
+            if (attempt >= 3)
+            {
+                Server.PrintToConsole("[PracWay] Unable to stabilize CT bot count. Expected: " + expectedCtBots + ", got: " + bots.Count);
+                return;
+            }
+
+            Server.ExecuteCommand("bot_kick");
+            _botsSpawning = true;
+            for (int i = 0; i < expectedCtBots; i++)
+                Server.ExecuteCommand("bot_add_ct");
+
+            AddTimer(0.6f, () =>
+            {
+                _botsSpawning = false;
+                EnsureExactCtBotsAndPlace(zone, expectedCtBots, money, botSlots, attempt + 1);
+            });
+            return;
+        }
+
+        for (int i = 0; i < bots.Count && i < botSlots.Length; i++)
+        {
+            var bSpawns = zone.GetSpawns(botSlots[i]);
+            if (bSpawns.Count == 0) continue;
+            var entry = bSpawns[Random.Shared.Next(bSpawns.Count)];
+
+            TeleportPlayer(bots[i], entry.Spawn);
+            EquipBotCt(bots[i], money);
+            ApplyBotAction(bots[i], entry);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // EQUIPEMENT BOTS CT
     // ═══════════════════════════════════════════════════════════════════════════
@@ -884,14 +913,15 @@ private void FinalizeRound()
         switch (entry.Action)
         {
             case BotAction.Stand:
+                StartHoldPositionTimer(bot, entry.Spawn, crouch: false);
                 break;
 
             case BotAction.Crouch:
-                StartCrouchHoldTimer(bot);
+                StartCrouchHoldTimer(bot, entry.Spawn);
                 break;
 
             case BotAction.CrouchPulse:
-                StartCrouchPulseTimer(bot);
+                StartCrouchPulseTimer(bot, entry.Spawn);
                 break;
 
             case BotAction.PeekAB:
@@ -913,7 +943,10 @@ private void FinalizeRound()
                     {
                         if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
                         if (entry.PeekTarget.HasValue)
+                        {
                             TeleportPlayer(bot, entry.PeekTarget.Value);
+                            StartHoldPositionTimer(bot, entry.PeekTarget.Value, crouch: false);
+                        }
                     });
                 });
                 break;
@@ -936,8 +969,7 @@ private void FinalizeRound()
         {
             if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
 
-            if (crouch)
-                bot.PlayerPawn.Value.Flags |= (uint)PlayerFlags.FL_DUCKING;
+            SetBotCrouch(bot, crouch);
 
             if (holding)
             {
@@ -962,7 +994,7 @@ private void FinalizeRound()
         _botTimers[key] = timer;
     }
 
-    private void StartCrouchHoldTimer(CCSPlayerController bot)
+    private void StartHoldPositionTimer(CCSPlayerController bot, WaySpawn anchor, bool crouch)
     {
         var key = bot.UserId ?? -1;
         if (key < 0) return;
@@ -970,12 +1002,27 @@ private void FinalizeRound()
         var timer = AddTimer(0.15f, () =>
         {
             if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
+            TeleportPlayer(bot, anchor);
+            SetBotCrouch(bot, crouch);
+        }, TimerFlags.REPEAT);
+        _botTimers[key] = timer;
+    }
+
+    private void StartCrouchHoldTimer(CCSPlayerController bot, WaySpawn anchor)
+    {
+        var key = bot.UserId ?? -1;
+        if (key < 0) return;
+
+        var timer = AddTimer(0.15f, () =>
+        {
+            if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
+            TeleportPlayer(bot, anchor);
             SetBotCrouch(bot, true);
         }, TimerFlags.REPEAT);
         _botTimers[key] = timer;
     }
 
-    private void StartCrouchPulseTimer(CCSPlayerController bot)
+    private void StartCrouchPulseTimer(CCSPlayerController bot, WaySpawn anchor)
     {
         var key = bot.UserId ?? -1;
         if (key < 0) return;
@@ -990,6 +1037,7 @@ private void FinalizeRound()
         {
             if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
 
+            TeleportPlayer(bot, anchor);
             SetBotCrouch(bot, crouching);
             elapsed += tick;
             if (elapsed >= (crouching ? crouchDuration : standDuration))
