@@ -601,13 +601,17 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
         _killCount.Clear();
         _session = new ActiveSession(cfg);
 
-        // Désactiver MatchZy proprement avant unload
-        Server.ExecuteCommand("matchzy_practice_mode_enabled false");
-        Server.ExecuteCommand("matchzy_autostart_mode 0");
+        // Le mode practice sera réinitialisé via unload/reload MatchZy
+        // (certaines versions n'exposent pas matchzy_practice_mode_enabled).
         AddTimer(0.3f, () =>
         {
             Server.ExecuteCommand("css_plugins unload MatchZy");
-            AddTimer(0.5f, () => Server.ExecuteCommand("exec PracWay/pracway.cfg"));
+            AddTimer(0.5f, () =>
+            {
+                Server.ExecuteCommand("exec PracWay/pracway.cfg");
+                // Déclenche EventRoundStart => StartNextRound()
+                Server.ExecuteCommand("mp_restartgame 1");
+            });
         });
     }
 
@@ -808,18 +812,18 @@ private void FinalizeRound()
     _killCount.Clear();
     Server.PrintToChatAll(P + " == FIN DU PARCOURS ==");
 
-    AddTimer(1.0f, () =>
+        AddTimer(1.0f, () =>
     {
         Server.ExecuteCommand("css_plugins load MatchZy");
         AddTimer(1.5f, () =>
         {
-            Server.ExecuteCommand("matchzy_practice_mode_enabled true");
             Server.ExecuteCommand("mp_warmuptime 9999");
             Server.ExecuteCommand("mp_warmup_pausetimer 1");
             if (caller != null && caller.IsValid)
                 caller.ExecuteClientCommandFromServer("css_prac");
             else
             {
+                Server.ExecuteCommand("css_prac");
                 Server.ExecuteCommand("mp_warmup_start");
                 Server.ExecuteCommand("mp_restartgame 1");
             }
