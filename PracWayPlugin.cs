@@ -36,7 +36,7 @@ public sealed class PracWayPlugin : BasePlugin
 
     // ─── Actions bots CT ───────────────────────────────────────────────────────
     // Les actions *A définissent le point de départ, *B le point d'arrivée
-    private enum BotAction { Stand, Crouch, PeekAB, PeekCrouch, FlashPeek }
+    private enum BotAction { Stand, Crouch, CrouchPulse, PeekAB, PeekCrouch, FlashPeek }
 
     // ─── Argents disponibles ───────────────────────────────────────────────────
     private static readonly int[] MoneyOptions = { 800, 2000, 2500, 3000, 3500, 4000, 4500, 6000 };
@@ -456,10 +456,11 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
         if (!int.TryParse(c, out var idx) || idx < 1 || idx > wiz.ZoneNames.Count) return;
         var zoneName = wiz.ZoneNames[idx - 1];
         wiz.CurrentZoneName = zoneName;
+        RefreshSpawnEditCheats();
         SetCtx(p, MenuContext.None);
         p.PrintToChat(P + " Parcours \x0A" + zoneName + "\x01 -- edition.");
         p.PrintToChat(P + " \x0A!wset <a|j1|j2|CT1..CT5> <n> [action]\x01");
-        p.PrintToChat(P + " Actions: stand  crouch  peeka/peekb  crpeeka/crpeekb  flpeeka/flpeekb");
+        p.PrintToChat(P + " Actions: stand  crouch  crouchpulse  peeka/peekb  crpeeka/crpeekb  flpeeka/flpeekb");
         p.PrintToChat(P + " Ex: \x0A!wset CT1 1 peeka\x01 puis se deplacer puis \x0A!wset CT1 1 peekb\x01");
         p.PrintToChat(P + " \x0A!wfin\x01 pour terminer.");
         ShowSpawnMarkers(zoneName, p);
@@ -495,9 +496,10 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
         _zones[name] = new WayZone(name);
         SaveZones();
         _wizards[caller.SteamID] = new ZoneWizard { CurrentZoneName = name };
+        RefreshSpawnEditCheats();
         caller.PrintToChat(P + " Parcours \x0A" + name + "\x01 cree !");
         caller.PrintToChat(P + " \x0A!wset <a|j1|j2|CT1..CT5> <n> [action]\x01 pour definir les spawns.");
-        caller.PrintToChat(P + " Actions: stand  crouch  peeka/peekb  crpeeka/crpeekb  flpeeka/flpeekb");
+        caller.PrintToChat(P + " Actions: stand  crouch  crouchpulse  peeka/peekb  crpeeka/crpeekb  flpeeka/flpeekb");
         caller.PrintToChat(P + " Ex: \x0A!wset CT1 1 peeka\x01 (point A) puis \x0A!wset CT1 1 peekb\x01 (point B)");
         PrintSpawnStatus(caller, name);
         ShowSpawnMarkers(name, caller);
@@ -527,6 +529,7 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
             caller.PrintToChat(P + " Aucun parcours actif. Creez ou selectionnez un parcours d'abord.");
             return;
         }
+        RefreshSpawnEditCheats();
         if (!TryGetPlayerCurrentSpawn(caller, out var spawn))
         {
             caller.PrintToChat(P + " Impossible de lire votre position.");
@@ -554,13 +557,14 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
             return;
         }
 
-        // ── Point A (peeka / crpeeka / flpeeka / stand / crouch) ─────────────
+        // ── Point A (peeka / crpeeka / flpeeka / stand / crouch / crouchpulse) ─────────────
         BotAction action = actionStr switch
         {
             "peeka"   => BotAction.PeekAB,
             "crpeeka" => BotAction.PeekCrouch,
             "flpeeka" => BotAction.FlashPeek,
             "crouch"  => BotAction.Crouch,
+            "crouchpulse" => BotAction.CrouchPulse,
             _         => BotAction.Stand,
         };
 
@@ -584,6 +588,7 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
             var zoneName = wiz.CurrentZoneName;
             var zone     = _zones.TryGetValue(zoneName, out var z) ? z : null;
             _wizards.Remove(caller.SteamID);
+            RefreshSpawnEditCheats();
             caller.PrintToChat(P + " Fin d'edition pour \x0A" + zoneName + "\x01." +
                 (zone?.IsReady == true ? " \x0CParcours pret." : " \x07Parcours incomplet."));
         }
@@ -858,6 +863,10 @@ private void FinalizeRound()
                 StartCrouchHoldTimer(bot);
                 break;
 
+            case BotAction.CrouchPulse:
+                StartCrouchPulseTimer(bot);
+                break;
+
             case BotAction.PeekAB:
                 if (entry.PeekTarget.HasValue)
                     StartPeekTimer(bot, entry.Spawn, entry.PeekTarget.Value, crouch: false);
@@ -934,7 +943,33 @@ private void FinalizeRound()
         var timer = AddTimer(0.15f, () =>
         {
             if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
-            bot.PlayerPawn.Value.Flags |= (uint)PlayerFlags.FL_DUCKING;
+            SetBotCrouch(bot, true);
+        }, TimerFlags.REPEAT);
+        _botTimers[key] = timer;
+    }
+
+    private void StartCrouchPulseTimer(CCSPlayerController bot)
+    {
+        var key = bot.UserId ?? -1;
+        if (key < 0) return;
+
+        const float tick = 0.10f;
+        const float crouchDuration = 2.0f;
+        const float standDuration = 1.0f;
+        bool crouching = true;
+        float elapsed = 0.0f;
+
+        var timer = AddTimer(tick, () =>
+        {
+            if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
+
+            SetBotCrouch(bot, crouching);
+            elapsed += tick;
+            if (elapsed >= (crouching ? crouchDuration : standDuration))
+            {
+                elapsed = 0.0f;
+                crouching = !crouching;
+            }
         }, TimerFlags.REPEAT);
         _botTimers[key] = timer;
     }
@@ -974,7 +1009,7 @@ private void FinalizeRound()
             for (int i = 0; i < spawns.Count; i++)
             {
                 var entry = spawns[i];
-                float h   = entry.Action == BotAction.Crouch ? 150f : entry.Action == BotAction.FlashPeek ? 400f : 300f;
+                float h   = (entry.Action == BotAction.Crouch || entry.Action == BotAction.CrouchPulse) ? 150f : entry.Action == BotAction.FlashPeek ? 400f : 300f;
                 var beam  = CreateSpawnBeam(entry.Spawn, r, g, b, h);
                 if (beam != null) _spawnMarkers.Add(beam);
                 caller?.PrintToChat(P + "  [" + SlotLabel(slot) + "-" + (i + 1) + "] " + ActionLabel(entry.Action));
@@ -1030,6 +1065,16 @@ private static void TeleportPlayer(CCSPlayerController p, WaySpawn s)
         new Vector(0, 0, 0));
 }
 
+private static void SetBotCrouch(CCSPlayerController bot, bool crouch)
+{
+    var pawn = bot.PlayerPawn?.Value;
+    if (pawn == null)
+        return;
+
+    if (crouch) pawn.Flags |= (uint)PlayerFlags.FL_DUCKING;
+    else pawn.Flags &= ~(uint)PlayerFlags.FL_DUCKING;
+}
+
 private static WaySpawn LerpSpawn(WaySpawn a, WaySpawn b, float t)
 {
     if (t < 0f) t = 0f;
@@ -1043,6 +1088,13 @@ private static WaySpawn LerpSpawn(WaySpawn a, WaySpawn b, float t)
         a.Roll + (b.Roll - a.Roll) * t
     );
 }
+
+private void RefreshSpawnEditCheats()
+{
+    bool editingInProgress = _wizards.Values.Any(w => !string.IsNullOrWhiteSpace(w.CurrentZoneName));
+    Server.ExecuteCommand("sv_cheats " + (editingInProgress ? "1" : "0"));
+}
+
 private static bool TryGetPlayerCurrentSpawn(CCSPlayerController p, out WaySpawn s)
 {
     s = default;
@@ -1093,6 +1145,7 @@ private static bool TryGetPlayerCurrentSpawn(CCSPlayerController p, out WaySpawn
         {
             case "stand":       action = BotAction.Stand;      return true;
             case "crouch":      action = BotAction.Crouch;     return true;
+            case "crouchpulse": action = BotAction.CrouchPulse; return true;
             case "peek_ab":     action = BotAction.PeekAB;     return true;
             case "peek_crouch": action = BotAction.PeekCrouch; return true;
             case "flash_peek":  action = BotAction.FlashPeek;  return true;
@@ -1111,6 +1164,7 @@ private static bool TryGetPlayerCurrentSpawn(CCSPlayerController p, out WaySpawn
     {
         BotAction.Stand      => "debout",
         BotAction.Crouch     => "accroupi",
+        BotAction.CrouchPulse => "accroupi 2s/debout 1s",
         BotAction.PeekAB     => "decale A-B",
         BotAction.PeekCrouch => "decale accroupi",
         BotAction.FlashPeek  => "flash+decale",
@@ -1155,7 +1209,7 @@ private static bool TryGetPlayerCurrentSpawn(CCSPlayerController p, out WaySpawn
         caller.PrintToChat(P + " \x0A!way\x01 -- Menu principal");
         caller.PrintToChat(P + " \x0A!way_new \"nom\"\x01 -- Creer un parcours");
         caller.PrintToChat(P + " \x0A!wset <slot> <n> [action]\x01 -- Spawn (action defaut: stand)");
-        caller.PrintToChat(P + " Actions: stand  crouch  peeka/peekb  crpeeka/crpeekb  flpeeka/flpeekb");
+        caller.PrintToChat(P + " Actions: stand  crouch  crouchpulse  peeka/peekb  crpeeka/crpeekb  flpeeka/flpeekb");
         caller.PrintToChat(P + " \x0A!wfin\x01 -- Terminer l'edition");
         caller.PrintToChat(P + " \x0A!way_stop\x01 -- Arreter le parcours");
     }
@@ -1330,6 +1384,7 @@ private static bool TryGetPlayerCurrentSpawn(CCSPlayerController p, out WaySpawn
             {
                 case "stand":       a = BotAction.Stand;      return true;
                 case "crouch":      a = BotAction.Crouch;     return true;
+                case "crouchpulse": a = BotAction.CrouchPulse; return true;
                 case "peek_ab":     a = BotAction.PeekAB;     return true;
                 case "peek_crouch": a = BotAction.PeekCrouch; return true;
                 case "flash_peek":  a = BotAction.FlashPeek;  return true;
@@ -1341,6 +1396,7 @@ private static bool TryGetPlayerCurrentSpawn(CCSPlayerController p, out WaySpawn
         {
             BotAction.Stand      => "stand",
             BotAction.Crouch     => "crouch",
+            BotAction.CrouchPulse => "crouchpulse",
             BotAction.PeekAB     => "peek_ab",
             BotAction.PeekCrouch => "peek_crouch",
             BotAction.FlashPeek  => "flash_peek",
