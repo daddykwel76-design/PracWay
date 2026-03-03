@@ -786,11 +786,8 @@ private void FinalizeRound()
         if (_session.LastRoundSuccess && _session.Config.SpecificWayName == _session.CurrentWayName && _session.Config.OriginalSpecificWayName == null)
             _session.Config.SpecificWayName = null;
         _session.RoundFinalized = false;
-        foreach (var pl in Utilities.GetPlayers().Where(p => p.IsValid && p.PawnIsAlive))
-{
-    var pawn = pl.PlayerPawn?.Value;
-    if (pawn != null) pawn.CommitSuicide(false, true);
-}
+        // Force un nouveau round pour déclencher OnRoundStart => StartNextRound.
+        Server.ExecuteCommand("mp_restartgame 1");
     });
 }
     private void StopWay(CCSPlayerController? caller)
