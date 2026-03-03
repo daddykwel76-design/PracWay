@@ -833,30 +833,55 @@ private void FinalizeRound()
     {
         if (_session == null) return;
 
+        // Réimpose les cvars bots à chaque passe (certains serveurs les écrasent).
+        Server.ExecuteCommand("bot_quota 0");
+        Server.ExecuteCommand("bot_quota_mode normal");
+        Server.ExecuteCommand("bot_join_team ct");
+
         var allBots = Utilities.GetPlayers()
             .Where(p => p.IsValid && p.IsBot)
+            .OrderBy(p => p.UserId ?? int.MaxValue)
             .ToList();
 
-        var bots = Utilities.GetPlayers()
+        // Supprime immédiatement les bots non-CT.
+        foreach (var b in allBots.Where(b => b.TeamNum != (int)CsTeam.CounterTerrorist))
+            Server.ExecuteCommand("bot_kick " + b.PlayerName);
+
+        var ctBots = Utilities.GetPlayers()
             .Where(p => p.IsValid && p.IsBot && p.TeamNum == (int)CsTeam.CounterTerrorist)
             .OrderBy(p => p.UserId ?? int.MaxValue)
             .ToList();
 
-        bool hasNonCtBots = allBots.Any(b => b.TeamNum != (int)CsTeam.CounterTerrorist);
-        if (bots.Count != expectedCtBots || allBots.Count != expectedCtBots || hasNonCtBots)
+        // Supprime les CT en trop (garde les plus anciens).
+        if (ctBots.Count > expectedCtBots)
+        {
+            foreach (var extra in ctBots.Skip(expectedCtBots))
+                Server.ExecuteCommand("bot_kick " + extra.PlayerName);
+        }
+        // Ajoute les CT manquants.
+        else if (ctBots.Count < expectedCtBots)
+        {
+            int missing = expectedCtBots - ctBots.Count;
+            for (int i = 0; i < missing; i++)
+                Server.ExecuteCommand("bot_add_ct");
+        }
+
+        // Re-check après ajustement.
+        var stableCtBots = Utilities.GetPlayers()
+            .Where(p => p.IsValid && p.IsBot && p.TeamNum == (int)CsTeam.CounterTerrorist)
+            .OrderBy(p => p.UserId ?? int.MaxValue)
+            .ToList();
+        var stableAllBots = Utilities.GetPlayers()
+            .Where(p => p.IsValid && p.IsBot)
+            .ToList();
+
+        if (stableCtBots.Count != expectedCtBots || stableAllBots.Count != expectedCtBots)
         {
             if (attempt >= 3)
             {
-                Server.PrintToConsole("[PracWay] Unable to stabilize bot count. Expected CT/Total: " + expectedCtBots + ", got CT: " + bots.Count + ", total: " + allBots.Count);
+                Server.PrintToConsole("[PracWay] Unable to stabilize bot count. Expected CT/Total: " + expectedCtBots + ", got CT: " + stableCtBots.Count + ", total: " + stableAllBots.Count);
                 return;
             }
-
-            Server.ExecuteCommand("bot_kick");
-            Server.ExecuteCommand("bot_quota 0");
-            Server.ExecuteCommand("bot_quota_mode normal");
-            Server.ExecuteCommand("bot_join_team ct");
-            for (int i = 0; i < expectedCtBots; i++)
-                Server.ExecuteCommand("bot_add_ct");
 
             AddTimer(0.6f, () =>
             {
@@ -865,15 +890,15 @@ private void FinalizeRound()
             return;
         }
 
-        for (int i = 0; i < bots.Count && i < botSlots.Length; i++)
+        for (int i = 0; i < stableCtBots.Count && i < botSlots.Length; i++)
         {
             var bSpawns = zone.GetSpawns(botSlots[i]);
             if (bSpawns.Count == 0) continue;
             var entry = bSpawns[Random.Shared.Next(bSpawns.Count)];
 
-            TeleportPlayer(bots[i], entry.Spawn);
-            EquipBotCt(bots[i], money);
-            ApplyBotAction(bots[i], entry);
+            TeleportPlayer(stableCtBots[i], entry.Spawn);
+            EquipBotCt(stableCtBots[i], money);
+            ApplyBotAction(stableCtBots[i], entry);
         }
     }
 
