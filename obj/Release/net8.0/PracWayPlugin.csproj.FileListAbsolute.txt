@@ -1,0 +1,12 @@
+D:\DEV\PracWay\bin\Release\net8.0\PracWay.deps.json
+D:\DEV\PracWay\bin\Release\net8.0\PracWay.dll
+D:\DEV\PracWay\bin\Release\net8.0\PracWay.pdb
+D:\DEV\PracWay\obj\Release\net8.0\PracWayPlugin.csproj.AssemblyReference.cache
+D:\DEV\PracWay\obj\Release\net8.0\PracWayPlugin.GeneratedMSBuildEditorConfig.editorconfig
+D:\DEV\PracWay\obj\Release\net8.0\PracWayPlugin.AssemblyInfoInputs.cache
+D:\DEV\PracWay\obj\Release\net8.0\PracWayPlugin.AssemblyInfo.cs
+D:\DEV\PracWay\obj\Release\net8.0\PracWayPlugin.csproj.CoreCompileInputs.cache
+D:\DEV\PracWay\obj\Release\net8.0\PracWay.dll
+D:\DEV\PracWay\obj\Release\net8.0\refint\PracWay.dll
+D:\DEV\PracWay\obj\Release\net8.0\PracWay.pdb
+D:\DEV\PracWay\obj\Release\net8.0\ref\PracWay.dll
