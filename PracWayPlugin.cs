@@ -601,18 +601,10 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
         _killCount.Clear();
         _session = new ActiveSession(cfg);
 
-        // Le mode practice sera réinitialisé via unload/reload MatchZy
-        // (certaines versions n'exposent pas matchzy_practice_mode_enabled).
-        AddTimer(0.3f, () =>
-        {
-            Server.ExecuteCommand("css_plugins unload MatchZy");
-            AddTimer(0.5f, () =>
-            {
-                Server.ExecuteCommand("exec PracWay/pracway.cfg");
-                // Déclenche EventRoundStart => StartNextRound()
-                Server.ExecuteCommand("mp_restartgame 1");
-            });
-        });
+        // Met le serveur dans un état practice stable avant le premier round PracWay.
+        Server.ExecuteCommand("exec PracWay/pracway.cfg");
+        // Déclenche EventRoundStart => StartNextRound()
+        Server.ExecuteCommand("mp_restartgame 1");
     }
 
     private void StartNextRound()
@@ -697,18 +689,12 @@ private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo _)
             SetPlayerMoney(ctPlayers[i], money);
         }
 
-        Server.ExecuteCommand("bot_kick");
-        AddTimer(0.3f, () =>
-        {
-            if (_session == null) return;
-            for (int i = 0; i < botCtCount; i++)
-                Server.ExecuteCommand("bot_add_ct");
-        });
-
 var botSlots = new[] { SpawnSlot.CT1, SpawnSlot.CT2, SpawnSlot.CT3, SpawnSlot.CT4, SpawnSlot.CT5 };
 
 // Étape 1 : kick + add des bots
 Server.ExecuteCommand("bot_kick");
+Server.ExecuteCommand("bot_freeze 0");
+Server.ExecuteCommand("bot_stop 0");
 AddTimer(0.8f, () =>
 {
     if (_session == null) return;
@@ -734,13 +720,6 @@ AddTimer(1.8f, () =>
 
 TeleportPlayer(bots[i], entry.Spawn);
 EquipBotCt(bots[i], money);
-
-var pawn = bots[i].PlayerPawn?.Value;
-if (pawn == null)
-    continue;
-
-pawn.MoveType = MoveType_t.MOVETYPE_NONE;
-
 ApplyBotAction(bots[i], entry);
     }
 });
@@ -797,7 +776,7 @@ private void FinalizeRound()
         EndWaySession(caller);
     }
 
- private void EndWaySession(CCSPlayerController? caller = null)
+ private void EndWaySession(CCSPlayerController? _caller = null)
 {
     if (_session == null) return;
     _session.RoundTimer?.Kill();
@@ -808,24 +787,6 @@ private void FinalizeRound()
     PrintKillCount();
     _killCount.Clear();
     Server.PrintToChatAll(P + " == FIN DU PARCOURS ==");
-
-        AddTimer(1.0f, () =>
-    {
-        Server.ExecuteCommand("css_plugins load MatchZy");
-        AddTimer(1.5f, () =>
-        {
-            Server.ExecuteCommand("mp_warmuptime 9999");
-            Server.ExecuteCommand("mp_warmup_pausetimer 1");
-            if (caller != null && caller.IsValid)
-                caller.ExecuteClientCommandFromServer("css_prac");
-            else
-            {
-                Server.ExecuteCommand("css_prac");
-                Server.ExecuteCommand("mp_warmup_start");
-                Server.ExecuteCommand("mp_restartgame 1");
-            }
-        });
-    });
 }
     
 
@@ -894,11 +855,7 @@ private void FinalizeRound()
                 break;
 
             case BotAction.Crouch:
-                AddTimer(0.2f, () =>
-                {
-                    if (bot.IsValid && bot.PlayerPawn?.Value != null)
-                        bot.PlayerPawn.Value.Flags |= (uint)PlayerFlags.FL_DUCKING;
-                });
+                StartCrouchHoldTimer(bot);
                 break;
 
             case BotAction.PeekAB:
@@ -931,16 +888,54 @@ private void FinalizeRound()
     {
         var key = bot.UserId ?? -1;
         if (key < 0) return;
-        bool atA = true;
-       var timer = AddTimer(2.0f, () =>
-{
-    if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
-    bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_WALK;
-    TeleportPlayer(bot, atA ? posB : posA);
-    if (crouch) bot.PlayerPawn.Value.Flags |= (uint)PlayerFlags.FL_DUCKING;
-    bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_NONE;
-    atA = !atA;
-}, TimerFlags.REPEAT);
+        bool forward = true;
+        float t = 0.0f;
+        const float tick = 0.10f;
+        const float moveDuration = 0.80f;
+        const float holdDuration = 0.70f;
+        bool holding = false;
+        float holdElapsed = 0.0f;
+
+        var timer = AddTimer(tick, () =>
+        {
+            if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
+
+            if (crouch)
+                bot.PlayerPawn.Value.Flags |= (uint)PlayerFlags.FL_DUCKING;
+
+            if (holding)
+            {
+                holdElapsed += tick;
+                if (holdElapsed < holdDuration) return;
+                holding = false;
+                holdElapsed = 0.0f;
+                t = 0.0f;
+                forward = !forward;
+            }
+
+            t += tick / moveDuration;
+            if (t > 1.0f) t = 1.0f;
+
+            var from = forward ? posA : posB;
+            var to   = forward ? posB : posA;
+            TeleportPlayer(bot, LerpSpawn(from, to, t));
+
+            if (t >= 1.0f)
+                holding = true;
+        }, TimerFlags.REPEAT);
+        _botTimers[key] = timer;
+    }
+
+    private void StartCrouchHoldTimer(CCSPlayerController bot)
+    {
+        var key = bot.UserId ?? -1;
+        if (key < 0) return;
+
+        var timer = AddTimer(0.15f, () =>
+        {
+            if (!bot.IsValid || bot.PlayerPawn?.Value == null) return;
+            bot.PlayerPawn.Value.Flags |= (uint)PlayerFlags.FL_DUCKING;
+        }, TimerFlags.REPEAT);
         _botTimers[key] = timer;
     }
 
@@ -1033,6 +1028,20 @@ private static void TeleportPlayer(CCSPlayerController p, WaySpawn s)
         new Vector(s.X, s.Y, s.Z),
         new QAngle(s.Pitch, s.Yaw, s.Roll),
         new Vector(0, 0, 0));
+}
+
+private static WaySpawn LerpSpawn(WaySpawn a, WaySpawn b, float t)
+{
+    if (t < 0f) t = 0f;
+    if (t > 1f) t = 1f;
+    return new WaySpawn(
+        a.X + (b.X - a.X) * t,
+        a.Y + (b.Y - a.Y) * t,
+        a.Z + (b.Z - a.Z) * t,
+        a.Pitch + (b.Pitch - a.Pitch) * t,
+        a.Yaw + (b.Yaw - a.Yaw) * t,
+        a.Roll + (b.Roll - a.Roll) * t
+    );
 }
 private static bool TryGetPlayerCurrentSpawn(CCSPlayerController p, out WaySpawn s)
 {
