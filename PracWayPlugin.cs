@@ -31,7 +31,7 @@ public sealed class PracWayPlugin : BasePlugin
     private static readonly int[] MoneyOptions = { 800, 2000, 2500, 3000, 3500, 4000, 4500, 6000 };
 
     // ─── Slots spawn ───────────────────────────────────────────────────────────
-    private enum SpawnSlot { A, CT1, CT2, CT3, CT4, CT5 }
+    private enum SpawnSlot { A, CT1, CT2, CT3, CT4, CT5, CT6, CT7, CT8, CT9, CT10, CT11, CT12 }
 
     // ─── Actions bots CT ───────────────────────────────────────────────────────
     private enum BotAction { Stand, Crouch }
@@ -56,7 +56,11 @@ public sealed class PracWayPlugin : BasePlugin
 
         public WayZone(string name) => Name = name;
 
-        public static readonly SpawnSlot[] BotSlots = { SpawnSlot.CT1, SpawnSlot.CT2, SpawnSlot.CT3, SpawnSlot.CT4, SpawnSlot.CT5 };
+        public static readonly SpawnSlot[] BotSlots =
+        {
+            SpawnSlot.CT1, SpawnSlot.CT2, SpawnSlot.CT3, SpawnSlot.CT4, SpawnSlot.CT5, SpawnSlot.CT6,
+            SpawnSlot.CT7, SpawnSlot.CT8, SpawnSlot.CT9, SpawnSlot.CT10, SpawnSlot.CT11, SpawnSlot.CT12
+        };
 
         public List<SpawnEntry> GetSpawns(SpawnSlot slot)
         {
@@ -158,6 +162,8 @@ public sealed class PracWayPlugin : BasePlugin
     private ActiveSession? _session;
     private bool _roundStartHandled;
     private bool _startNextRoundScheduled;
+    private bool _roundTransitionPending;
+    private bool _startingRound;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHARGEMENT
