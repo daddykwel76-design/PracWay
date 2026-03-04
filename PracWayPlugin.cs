@@ -290,6 +290,15 @@ public sealed class PracWayPlugin : BasePlugin
 
         if (!p.IsBot) return HookResult.Continue;
 
+        // Guard re-fires : CS2 peut fire OnPlayerSpawn 3-4x par bot.
+        // Si ce slot a déjà été traité ce round, il faut IGNORER sans passer
+        // par la branche "non géré" (sinon on re-freeze un bot déjà placé/équipé).
+        if (_processedSpawnSlots.Contains(p.Slot))
+        {
+            Console.WriteLine("[PracWay][DEBUG] OnPlayerSpawn re-fire ignoré — " + p.PlayerName + " slot=" + p.Slot);
+            return HookResult.Continue;
+        }
+
         if (!_ownerOfBots.ContainsKey(p.Slot))
         {
             // Bot non attendu (respawn d'un bot déjà tué, ou surnuméraire).
@@ -304,13 +313,6 @@ public sealed class PracWayPlugin : BasePlugin
         }
 
         var (entry, money) = _ownerOfBots[p.Slot];
-
-        // Guard re-fires : CS2 fire OnPlayerSpawn 3-4x par bot (changement équipe + spawn)
-        if (_processedSpawnSlots.Contains(p.Slot))
-        {
-            Console.WriteLine("[PracWay][DEBUG] OnPlayerSpawn re-fire ignoré — " + p.PlayerName + " slot=" + p.Slot);
-            return HookResult.Continue;
-        }
         _processedSpawnSlots.Add(p.Slot);
         _ownerOfBots.Remove(p.Slot);
         Console.WriteLine("[PracWay][DEBUG] OnPlayerSpawn bot géré (1er fire) — " + p.PlayerName + " slot=" + p.Slot);
