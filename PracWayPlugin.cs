@@ -911,8 +911,10 @@ public sealed class PracWayPlugin : BasePlugin
         for (int i = assignIdx; i < newEntries.Count; i++)
             _pendingBotSlots[i - assignIdx] = newEntries[i];
 
-        Server.ExecuteCommand("bot_quota 0");
+        // IMPORTANT: en round actif, bot_quota doit refléter le nombre de bots voulu.
+        // bot_quota 0 déclenche des kicks asynchrones et casse la manche suivante.
         Server.ExecuteCommand("bot_quota_mode normal");
+        Server.ExecuteCommand("bot_quota " + _session.BotCount);
         Server.ExecuteCommand("bot_join_team ct");
 
         if (neededNew > 0)
