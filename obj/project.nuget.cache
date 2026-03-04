@@ -8,17 +8,8 @@
     {
       "code": "NU1301",
       "level": "Error",
-      "message": "Impossible de charger l'index de service pour la source https://api.nuget.org/v3/index.json.\r\n  Une tentative d’accès à un socket de manière interdite par ses autorisations d’accès a été tentée. (api.nuget.org:443)\r\n  Une tentative d’accès à un socket de manière interdite par ses autorisations d’accès a été tentée.",
+      "message": "Impossible d'obtenir les informations de signature du dépôt pour la source https://api.nuget.org/v3-index/repository-signatures/5.0.0/index.json.\r\n  Une tentative d’accès à un socket de manière interdite par ses autorisations d’accès a été tentée. (api.nuget.org:443)\r\n  Une tentative d’accès à un socket de manière interdite par ses autorisations d’accès a été tentée.",
       "projectPath": "D:\\DEV\\PracWay\\PracWayPlugin.csproj",
-      "filePath": "D:\\DEV\\PracWay\\PracWayPlugin.csproj",
-      "targetGraphs": []
-    },
-    {
-      "code": "NU1900",
-      "level": "Warning",
-      "message": "Une erreur s’est produite lors de l’obtention des données de vulnérabilité du package\u00A0: Impossible de charger l'index de service pour la source https://api.nuget.org/v3/index.json.",
-      "projectPath": "D:\\DEV\\PracWay\\PracWayPlugin.csproj",
-      "warningLevel": 1,
       "filePath": "D:\\DEV\\PracWay\\PracWayPlugin.csproj",
       "targetGraphs": []
     }

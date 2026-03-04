@@ -735,6 +735,7 @@ public sealed class PracWayPlugin : BasePlugin
         _session = new ActiveSession(cfg);
         Server.ExecuteCommand("exec PracWay/pracway.cfg");
         Server.ExecuteCommand("bot_quota 0");
+        Server.ExecuteCommand("bot_quota_mode normal");
         Server.ExecuteCommand("mp_warmup_pausetimer 1");
         Server.ExecuteCommand("mp_warmup_start");
         // Pas de bot_kick ici : un kick en warmup déclenche des respawns en cascade.
@@ -906,6 +907,7 @@ public sealed class PracWayPlugin : BasePlugin
             _pendingBotSlots[i - assignIdx] = newEntries[i];
 
         Server.ExecuteCommand("bot_quota 0");
+        Server.ExecuteCommand("bot_quota_mode normal");
         Server.ExecuteCommand("bot_join_team ct");
 
         if (neededNew > 0)
