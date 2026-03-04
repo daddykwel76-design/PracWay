@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PracWay")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e7bc8e228b5c32639d457d5e1599d7090f0d5c1c")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+16a375aabf2601ace4f9ba8d6ecca65c5169f95b")]
 [assembly: System.Reflection.AssemblyProductAttribute("PracWay")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PracWay")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
