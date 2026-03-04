@@ -331,8 +331,8 @@ public sealed class PracWayPlugin : BasePlugin
             if (!p.IsValid || !p.IsBot) return;
             TeleportTo(p, entry.Spawn);
             SetCrouch(p, entry.Action == BotAction.Crouch);
-            EquipBot(p, money);
-            p.ExecuteClientCommandFromServer("slot1");
+            var combatSlot = EquipBot(p, money);
+            ForceBotCombatSlot(p, combatSlot);
         });
 
         return HookResult.Continue;
@@ -892,6 +892,15 @@ public sealed class PracWayPlugin : BasePlugin
             _activeBotSlots.Add(s);
         }
 
+        // Important: réassigner d'abord _ownerOfBots, puis forcer le respawn.
+        // Ainsi OnPlayerSpawn trouve toujours une entrée valide et équipe correctement le bot.
+        foreach (var s in existingSlots)
+        {
+            var bot = Utilities.GetPlayerFromSlot(s);
+            if (bot == null || !bot.IsValid || !bot.IsBot || !bot.PawnIsAlive) continue;
+            bot.CommitSuicide(false, false);
+        }
+
         // Calculer combien de nouveaux bots il faut ajouter
         int neededNew = newEntries.Count - assignIdx;
         _botRequestCount = neededNew;
@@ -1021,18 +1030,42 @@ public sealed class PracWayPlugin : BasePlugin
     // EQUIPEMENT BOTS
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private static void EquipBot(CCSPlayerController bot, int money)
+    private static string EquipBot(CCSPlayerController bot, int money)
     {
         bot.RemoveWeapons();
         bot.GiveNamedItem("weapon_knife");
         bot.GiveNamedItem("item_kevlar");
 
-        if      (money <=  800) bot.GiveNamedItem("weapon_usp_silencer");
-        else if (money <= 2000) bot.GiveNamedItem("weapon_mp9");
+        if (money <= 800)
+        {
+            bot.GiveNamedItem("weapon_usp_silencer");
+            return "slot2";
+        }
+        if (money <= 2000) bot.GiveNamedItem("weapon_mp9");
         else if (money <= 2500) bot.GiveNamedItem("weapon_mp5sd");
         else if (money <= 3000) { bot.GiveNamedItem("item_assaultsuit"); bot.GiveNamedItem("weapon_famas"); }
         else if (money <= 3500) { bot.GiveNamedItem("item_assaultsuit"); bot.GiveNamedItem(Coin() ? "weapon_xm1014" : "weapon_p90"); }
         else                    { bot.GiveNamedItem("item_assaultsuit"); bot.GiveNamedItem(Coin() ? "weapon_m4a1_s" : "weapon_m4a4"); }
+
+        return "slot1";
+    }
+
+    private void ForceBotCombatSlot(CCSPlayerController bot, string slotCmd)
+    {
+        if (!bot.IsValid || !bot.IsBot) return;
+
+        // Plusieurs tentatives: l'inventaire peut être reconstruit juste après le spawn.
+        bot.ExecuteClientCommandFromServer(slotCmd);
+        AddTimer(0.15f, () =>
+        {
+            if (!bot.IsValid || !bot.IsBot) return;
+            bot.ExecuteClientCommandFromServer(slotCmd);
+        });
+        AddTimer(0.40f, () =>
+        {
+            if (!bot.IsValid || !bot.IsBot) return;
+            bot.ExecuteClientCommandFromServer(slotCmd);
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1057,19 +1090,10 @@ public sealed class PracWayPlugin : BasePlugin
 
     private void StopBotTimers()
     {
-        // Comme OpenPrefirePrac : on NE KICK PAS entre les rounds.
-        // CommitSuicide → le bot meurt → respawne → OnPlayerSpawn le replace via _ownerOfBots.
         _processedSpawnSlots.Clear();
         _ownerOfBots.Clear();
         _pendingBotSlots.Clear();
         _botRequestCount = 0;
-
-        // Tuer TOUS les bots : gérés (ils respawneront et seront réassignés)
-        // et non gérés (surnuméraires freezés qui ne doivent pas être réutilisés).
-        // CommitSuicide en warmup ne déclenche PAS de boucle — le bot respawne une fois,
-        // et si son slot n'est pas dans _ownerOfBots, il sera freezé et ignoré.
-        foreach (var bot in Utilities.GetPlayers().Where(p => p.IsValid && p.IsBot && p.PawnIsAlive))
-            bot.CommitSuicide(false, false);
 
         // Ne pas vider _activeBotSlots ici — on en a besoin dans StartNextRound
         // pour réassigner les entrées spawn aux slots existants.
