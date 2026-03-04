@@ -157,6 +157,7 @@ public sealed class PracWayPlugin : BasePlugin
 
     private ActiveSession? _session;
     private bool _roundStartHandled;
+    private bool _startNextRoundScheduled;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CHARGEMENT
@@ -192,6 +193,7 @@ public sealed class PracWayPlugin : BasePlugin
         _ownerOfBots.Clear();
         _pendingBotSlots.Clear();
         _botRequestCount = 0;
+        _startNextRoundScheduled = false;
         ClearMarkers();
         StopBotTimers();
         LoadZones();
@@ -225,12 +227,16 @@ public sealed class PracWayPlugin : BasePlugin
     private HookResult OnRoundStart(EventRoundStart @event, GameEventInfo _)
     {
         if (_session == null) return HookResult.Continue;
+        if (_startNextRoundScheduled) return HookResult.Continue;
+        if (!_session.RoundFinalized) return HookResult.Continue;
         if (_roundStartHandled) return HookResult.Continue;
         _roundStartHandled = true;
+        _startNextRoundScheduled = true;
 
         AddTimer(0.5f, () =>
         {
             _roundStartHandled = false;
+            _startNextRoundScheduled = false;
             if (_session != null) StartNextRound();
         });
 
@@ -735,7 +741,12 @@ public sealed class PracWayPlugin : BasePlugin
         // _activeBotSlots est vide au round 1 → StartNextRound fera bot_add_ct x5.
         // Les éventuels bots résidus seront capturés comme surnuméraires et ignorés.
         Console.WriteLine("[PracWay][DEBUG] LaunchWay — StartNextRound dans 1f");
-        AddTimer(1f, () => { if (_session != null) StartNextRound(); });
+        _startNextRoundScheduled = true;
+        AddTimer(1f, () =>
+        {
+            _startNextRoundScheduled = false;
+            if (_session != null) StartNextRound();
+        });
         Console.WriteLine("[PracWay][DEBUG] LaunchWay — fin");
     }
 
@@ -870,7 +881,13 @@ public sealed class PracWayPlugin : BasePlugin
 
         // Réassigner les entrées aux bots déjà sur le serveur (ils vont respawner via CommitSuicide)
         // AVANT le respawn pour que _ownerOfBots soit prêt quand OnPlayerSpawn fire.
-        var existingSlots = _activeBotSlots.ToList();
+        var existingSlots = _activeBotSlots
+            .Where(slot =>
+            {
+                var bot = Utilities.GetPlayerFromSlot(slot);
+                return bot != null && bot.IsValid && bot.IsBot;
+            })
+            .ToList();
         _activeBotSlots.Clear();
         int assignIdx = 0;
         foreach (var s in existingSlots)
@@ -948,8 +965,10 @@ public sealed class PracWayPlugin : BasePlugin
         // mais CS2 les traite de façon asynchrone. On attend que tous soient effectifs
         // avant de lancer bot_add_ct du round suivant.
         // Délai = 3s (annonce) + 1s (buffer kicks CS2)
+        _startNextRoundScheduled = true;
         AddTimer(4.0f, () =>
         {
+            _startNextRoundScheduled = false;
             if (_session == null) return;
             _session.RoundFinalized = false;
             StartNextRound();
@@ -968,6 +987,7 @@ public sealed class PracWayPlugin : BasePlugin
         if (_session == null) return;
         _session.RoundTimer?.Kill();
         _session = null;
+        _startNextRoundScheduled = false;
         StopBotTimers();
         // Sortir du warmup d'abord, PUIS kicker — hors warmup bot_quota 0 n'a plus d'effet
         // donc le kick ne provoquera pas de respawn automatique.

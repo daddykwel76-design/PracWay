@@ -10,7 +10,7 @@
         "projectUniqueName": "D:\\DEV\\PracWay\\PracWayPlugin.csproj",
         "projectName": "PracWay",
         "projectPath": "D:\\DEV\\PracWay\\PracWayPlugin.csproj",
-        "packagesPath": "C:\\Users\\felip\\.nuget\\packages\\",
+        "packagesPath": "d:\\DEV\\PracWay\\.dotnet\\.nuget\\packages\\",
         "outputPath": "D:\\DEV\\PracWay\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
