@@ -890,17 +890,29 @@ public sealed class PracWayPlugin : BasePlugin
         foreach (var s in existingSlots)
         {
             if (assignIdx >= newEntries.Count) break;
-            _ownerOfBots[s] = newEntries[assignIdx++];
+            var assignment = newEntries[assignIdx++];
+            _ownerOfBots[s] = assignment;
             _activeBotSlots.Add(s);
-        }
-
-        // Important: réassigner d'abord _ownerOfBots, puis forcer le respawn.
-        // Ainsi OnPlayerSpawn trouve toujours une entrée valide et équipe correctement le bot.
-        foreach (var s in existingSlots)
-        {
             var bot = Utilities.GetPlayerFromSlot(s);
             if (bot == null || !bot.IsValid || !bot.IsBot || !bot.PawnIsAlive) continue;
-            bot.CommitSuicide(false, false);
+
+            // Bot déjà vivant au changement de round: le préparer immédiatement
+            // au lieu d'attendre un spawn event qui peut ne jamais arriver.
+            _processedSpawnSlots.Add(s);
+            _ownerOfBots.Remove(s);
+            AddTimer(0.5f, () =>
+            {
+                if (!bot.IsValid || !bot.IsBot) return;
+                FreezeBotAI(bot, true);
+            });
+            AddTimer(0.55f, () =>
+            {
+                if (!bot.IsValid || !bot.IsBot) return;
+                TeleportTo(bot, assignment.entry.Spawn);
+                SetCrouch(bot, assignment.entry.Action == BotAction.Crouch);
+                var combatSlot = EquipBot(bot, assignment.money);
+                ForceBotCombatSlot(bot, combatSlot);
+            });
         }
 
         // Calculer combien de nouveaux bots il faut ajouter
@@ -913,22 +925,13 @@ public sealed class PracWayPlugin : BasePlugin
 
         // IMPORTANT: en round actif, bot_quota doit refléter le nombre de bots voulu.
         // bot_quota 0 déclenche des kicks asynchrones et casse la manche suivante.
-        Server.ExecuteCommand("bot_quota_mode normal");
+        Server.ExecuteCommand("bot_quota_mode fill");
         Server.ExecuteCommand("bot_quota " + _session.BotCount);
         Server.ExecuteCommand("bot_join_team ct");
 
         if (neededNew > 0)
         {
-            Console.WriteLine("[PracWay][DEBUG] bot_add_ct x" + neededNew + " (bots existants=" + existingSlots.Count + ")");
-            for (int i = 0; i < neededNew; i++)
-            {
-                var delay = i * 0.3f;
-                AddTimer(delay, () =>
-                {
-                    if (_session == null) return;
-                    Server.ExecuteCommand("bot_add_ct");
-                });
-            }
+            Console.WriteLine("[PracWay][DEBUG] attente auto-fill de " + neededNew + " bots (bots existants=" + existingSlots.Count + ")");
         }
         else
         {
