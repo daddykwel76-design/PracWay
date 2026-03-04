@@ -160,8 +160,6 @@ public sealed class PracWayPlugin : BasePlugin
     private readonly HashSet<int> _processedSpawnSlots = new();
 
     private ActiveSession? _session;
-    private bool _roundStartHandled;
-    private bool _startNextRoundScheduled;
     private bool _roundTransitionPending;
     private bool _startingRound;
 
@@ -199,7 +197,8 @@ public sealed class PracWayPlugin : BasePlugin
         _ownerOfBots.Clear();
         _pendingBotSlots.Clear();
         _botRequestCount = 0;
-        _startNextRoundScheduled = false;
+        _roundTransitionPending = false;
+        _startingRound = false;
         ClearMarkers();
         StopBotTimers();
         LoadZones();
@@ -224,28 +223,15 @@ public sealed class PracWayPlugin : BasePlugin
         }
         else
         {
-            // Bot surnuméraire — on NE KICK PAS (kick = boucle infinie).
-            // Il restera en warmup inactif jusqu'au prochain round.
-            Console.WriteLine("[PracWay][DEBUG] OnClientPutInServer — bot slot=" + slot + " surnuméraire, ignoré");
+            Console.WriteLine("[PracWay][DEBUG] OnClientPutInServer — bot slot=" + slot + " surnuméraire, kick");
+            KickBot(slot);
         }
     }
 
     private HookResult OnRoundStart(EventRoundStart @event, GameEventInfo _)
     {
-        if (_session == null) return HookResult.Continue;
-        if (_startNextRoundScheduled) return HookResult.Continue;
-        if (!_session.RoundFinalized) return HookResult.Continue;
-        if (_roundStartHandled) return HookResult.Continue;
-        _roundStartHandled = true;
-        _startNextRoundScheduled = true;
-
-        AddTimer(0.5f, () =>
-        {
-            _roundStartHandled = false;
-            _startNextRoundScheduled = false;
-            if (_session != null) StartNextRound();
-        });
-
+        // Le cycle des rounds est géré explicitement par LaunchWay + FinalizeRound.
+        // Ne rien faire ici pour éviter les doubles StartNextRound causés par les events warmup.
         return HookResult.Continue;
     }
 
@@ -579,7 +565,7 @@ public sealed class PracWayPlugin : BasePlugin
         p.PrintToChat(P + " Edition de \x0A" + name + "\x01.");
         PrintSpawnStatus(p, name);
         ShowMarkers(name);
-        p.PrintToChat(P + " \x0A!wset <a|CT1..CT5> <n> [action]\x01 pour definir les spawns.");
+        p.PrintToChat(P + " \x0A!wset <a|CT1..CT12> <n> [action]\x01 pour definir les spawns.");
         p.PrintToChat(P + " Actions: \x0Astand  crouch");
         p.PrintToChat(P + " Tapez \x0A!wfin\x01 pour terminer.");
     }
@@ -655,7 +641,7 @@ public sealed class PracWayPlugin : BasePlugin
 
         p.PrintToChat(P + " Parcours \x0A" + name + "\x01 cree !");
         p.PrintToChat(P + " Definissez les spawns avec \x0A!wset <slot> <n> [action]");
-        p.PrintToChat(P + " Slots: \x0Aa  CT1  CT2  CT3  CT4  CT5");
+        p.PrintToChat(P + " Slots: \x0Aa  CT1  CT2  CT3  CT4  CT5  CT6  CT7  CT8  CT9  CT10  CT11  CT12");
         p.PrintToChat(P + " Actions: \x0Astand  crouch");
         PrintSpawnStatus(p, name);
     }
@@ -675,7 +661,7 @@ public sealed class PracWayPlugin : BasePlugin
 
         if (!TryParseSlot(parts[0], out var slot))
         {
-            p.PrintToChat(P + " Slot invalide. Valeurs: \x0Aa  CT1  CT2  CT3  CT4  CT5");
+            p.PrintToChat(P + " Slot invalide. Valeurs: \x0Aa  CT1..CT12");
             return;
         }
         if (!int.TryParse(parts[1], out var num) || num < 1)
@@ -748,10 +734,8 @@ public sealed class PracWayPlugin : BasePlugin
         // _activeBotSlots est vide au round 1 → StartNextRound fera bot_add_ct x5.
         // Les éventuels bots résidus seront capturés comme surnuméraires et ignorés.
         Console.WriteLine("[PracWay][DEBUG] LaunchWay — StartNextRound dans 1f");
-        _startNextRoundScheduled = true;
         AddTimer(1f, () =>
         {
-            _startNextRoundScheduled = false;
             if (_session != null) StartNextRound();
         });
         Console.WriteLine("[PracWay][DEBUG] LaunchWay — fin");
@@ -760,6 +744,8 @@ public sealed class PracWayPlugin : BasePlugin
     private void StartNextRound()
     {
         if (_session == null) return;
+        if (_startingRound) return;
+        _startingRound = true;
         Console.WriteLine("[PracWay][DEBUG] StartNextRound — debut (round " + (_session.RoundNumber + 1) + ")");
 
         StopBotTimers();
@@ -769,6 +755,7 @@ public sealed class PracWayPlugin : BasePlugin
         {
             Server.PrintToChatAll(P + " \x0CLimite de rounds atteinte !");
             EndSession();
+            _startingRound = false;
             return;
         }
 
@@ -780,6 +767,7 @@ public sealed class PracWayPlugin : BasePlugin
         {
             Server.PrintToChatAll(P + " \x07Aucun joueur present. Parcours annule.");
             EndSession();
+            _startingRound = false;
             return;
         }
 
@@ -787,7 +775,7 @@ public sealed class PracWayPlugin : BasePlugin
         if (wayName == null || !_zones.ContainsKey(wayName))
         {
             var ready = ReadyZones();
-            if (ready.Count == 0) { Server.PrintToChatAll(P + " \x07Aucun parcours valide."); EndSession(); return; }
+            if (ready.Count == 0) { Server.PrintToChatAll(P + " \x07Aucun parcours valide."); EndSession(); _startingRound = false; return; }
 
             var candidates = _session.LastRoundWon || _session.RoundNumber == 0
                 ? ready.Where(z => z.Name != _session.CurrentWayName).ToList()
@@ -946,12 +934,15 @@ public sealed class PracWayPlugin : BasePlugin
 
         Console.WriteLine("[PracWay][DEBUG] StartNextRound — fin OK");
         Server.PrintToChatAll(P + " Manche \x04" + _session.RoundNumber +
-            "\x01 -- \x0A" + wayName + "\x01 -- " + terros.Count + "v5 bots CT -- " + money + "$");
+            "\x01 -- \x0A" + wayName + "\x01 -- " + terros.Count + "v" + _session.BotCount + " bots CT -- " + money + "$");
+        _startingRound = false;
     }
 
     private void FinalizeRound()
     {
         if (_session == null) return;
+        if (_roundTransitionPending) return;
+        _roundTransitionPending = true;
         // RoundFinalized est déjà positionné par l'appelant (OnRoundEnd ou OnPlayerDeath).
         // On ne le reteste pas ici pour éviter la double-guard.
 
@@ -973,10 +964,9 @@ public sealed class PracWayPlugin : BasePlugin
         // mais CS2 les traite de façon asynchrone. On attend que tous soient effectifs
         // avant de lancer bot_add_ct du round suivant.
         // Délai = 3s (annonce) + 1s (buffer kicks CS2)
-        _startNextRoundScheduled = true;
         AddTimer(4.0f, () =>
         {
-            _startNextRoundScheduled = false;
+            _roundTransitionPending = false;
             if (_session == null) return;
             _session.RoundFinalized = false;
             StartNextRound();
@@ -995,7 +985,8 @@ public sealed class PracWayPlugin : BasePlugin
         if (_session == null) return;
         _session.RoundTimer?.Kill();
         _session = null;
-        _startNextRoundScheduled = false;
+        _roundTransitionPending = false;
+        _startingRound = false;
         StopBotTimers();
         // Sortir du warmup d'abord, PUIS kicker — hors warmup bot_quota 0 n'a plus d'effet
         // donc le kick ne provoquera pas de respawn automatique.
@@ -1017,6 +1008,13 @@ public sealed class PracWayPlugin : BasePlugin
             var name = pl?.PlayerName ?? "#" + kv.Key;
             Server.PrintToChatAll(P + " \x0A" + name + "\x01 : \x04" + kv.Value + "\x01 kill(s)");
         }
+    }
+
+    private static void KickBot(int slot)
+    {
+        var bot = Utilities.GetPlayerFromSlot(slot);
+        if (bot == null || !bot.IsValid || !bot.IsBot) return;
+        Server.ExecuteCommand("bot_kick " + bot.PlayerName);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1095,6 +1093,13 @@ public sealed class PracWayPlugin : BasePlugin
             [SpawnSlot.CT3] = (0,   220, 220),
             [SpawnSlot.CT4] = (180, 0,   255),
             [SpawnSlot.CT5] = (255, 255, 255),
+            [SpawnSlot.CT6] = (255, 128, 0  ),
+            [SpawnSlot.CT7] = (255, 0,   128),
+            [SpawnSlot.CT8] = (128, 255, 0  ),
+            [SpawnSlot.CT9] = (0,   128, 255),
+            [SpawnSlot.CT10] = (128, 128, 255),
+            [SpawnSlot.CT11] = (255, 128, 128),
+            [SpawnSlot.CT12] = (128, 255, 255),
         };
 
         foreach (var (slot, (r, g, b)) in colors)
@@ -1149,7 +1154,7 @@ public sealed class PracWayPlugin : BasePlugin
         p.PrintToChat(P + " \x0A!way_stop\x01 -- Arreter le parcours");
         p.PrintToChat(P + " \x0A!way_create \"nom\"\x01 -- Creer un parcours");
         p.PrintToChat(P + " \x0A!wset <slot> <n> [action]\x01 -- Definir un spawn");
-        p.PrintToChat(P + "   Slots: \x0Aa  CT1  CT2  CT3  CT4  CT5");
+        p.PrintToChat(P + "   Slots: \x0Aa  CT1  CT2  CT3  CT4  CT5  CT6  CT7  CT8  CT9  CT10  CT11  CT12");
         p.PrintToChat(P + "   Actions: \x0Astand  crouch");
         p.PrintToChat(P + " \x0A!wfin\x01 -- Terminer l'edition");
         p.PrintToChat(P + " \x0A!duel_way\x01 -- Afficher cette aide");
@@ -1379,6 +1384,13 @@ public sealed class PracWayPlugin : BasePlugin
             case "ct3": slot = SpawnSlot.CT3; return true;
             case "ct4": slot = SpawnSlot.CT4; return true;
             case "ct5": slot = SpawnSlot.CT5; return true;
+            case "ct6": slot = SpawnSlot.CT6; return true;
+            case "ct7": slot = SpawnSlot.CT7; return true;
+            case "ct8": slot = SpawnSlot.CT8; return true;
+            case "ct9": slot = SpawnSlot.CT9; return true;
+            case "ct10": slot = SpawnSlot.CT10; return true;
+            case "ct11": slot = SpawnSlot.CT11; return true;
+            case "ct12": slot = SpawnSlot.CT12; return true;
             default:                          return false;
         }
     }
@@ -1398,7 +1410,9 @@ public sealed class PracWayPlugin : BasePlugin
     {
         SpawnSlot.A   => "a",
         SpawnSlot.CT1 => "CT1", SpawnSlot.CT2 => "CT2", SpawnSlot.CT3 => "CT3",
-        SpawnSlot.CT4 => "CT4", SpawnSlot.CT5 => "CT5", _ => "?"
+        SpawnSlot.CT4 => "CT4", SpawnSlot.CT5 => "CT5", SpawnSlot.CT6 => "CT6",
+        SpawnSlot.CT7 => "CT7", SpawnSlot.CT8 => "CT8", SpawnSlot.CT9 => "CT9",
+        SpawnSlot.CT10 => "CT10", SpawnSlot.CT11 => "CT11", SpawnSlot.CT12 => "CT12", _ => "?"
     };
 
     private static string ActionLabel(BotAction a) => a switch
@@ -1423,8 +1437,13 @@ public sealed class PracWayPlugin : BasePlugin
     private void PrintSpawnStatus(CCSPlayerController p, string zoneName)
     {
         if (!_zones.TryGetValue(zoneName, out var zone)) return;
-        var slots = new[] { SpawnSlot.A, SpawnSlot.CT1, SpawnSlot.CT2, SpawnSlot.CT3, SpawnSlot.CT4, SpawnSlot.CT5 };
-        var mins  = new[] { MinASpawns,  MinCtSpawns,   MinCtSpawns,   MinCtSpawns,   MinCtSpawns,   MinCtSpawns   };
+        var slots = new[]
+        {
+            SpawnSlot.A, SpawnSlot.CT1, SpawnSlot.CT2, SpawnSlot.CT3, SpawnSlot.CT4, SpawnSlot.CT5, SpawnSlot.CT6,
+            SpawnSlot.CT7, SpawnSlot.CT8, SpawnSlot.CT9, SpawnSlot.CT10, SpawnSlot.CT11, SpawnSlot.CT12
+        };
+        var mins = Enumerable.Repeat(MinCtSpawns, slots.Length).ToArray();
+        mins[0] = MinASpawns;
         p.PrintToChat(P + " \x04== SPAWNS ==");
         for (int i = 0; i < slots.Length; i++)
         {
